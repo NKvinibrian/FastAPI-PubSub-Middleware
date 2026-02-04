@@ -19,7 +19,7 @@ from typing import List, Tuple, Callable
 from app.api.v1.schemas.api_sub.receiver import PubSub, PubSubMessage, PubSubAttributes
 from edwh_uuid7 import uuid7
 from main import app
-from app.core.depedencies import get_example_integration
+from app.core.dependencies import get_example_integration
 import base64
 import time
 import logging

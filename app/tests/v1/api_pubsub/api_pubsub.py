@@ -9,10 +9,9 @@ Funções:
     test_pubsub_example: Testa o fluxo completo de pub/sub
 """
 
-from fastapi.testclient import TestClient
 from main import app
 from app.tests.mocks.pubsub.mock_pubsub import MockPubSubPublisher
-from app.core.depedencies import get_pubsub
+from app.core.dependencies import get_pubsub
 from app.api.v1.schemas.api_pub.sender import SenderSchema
 import logging
 from faker import Faker

@@ -11,7 +11,7 @@ Attributes:
 from fastapi import APIRouter, Depends
 from fastapi import status as http_status
 from app.api.v1.schemas.api_pub.sender import SenderSchema
-from app.core.depedencies import get_pubsub
+from app.core.dependencies import get_pubsub
 from app.domain.protocol.pubsub.pubsub import PubSubProtocol
 
 router = APIRouter(

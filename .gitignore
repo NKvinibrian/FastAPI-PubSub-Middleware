@@ -1,3 +1,82 @@
-/.env
-.venv
-.idea
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ambientes virtuais
+venv/
+.venv/
+env/
+ENV/
+
+# =========================
+# Dependências
+# =========================
+site-packages/
+pip-wheel-metadata/
+
+# =========================
+# Build / distribuição
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# =========================
+# Testes
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# =========================
+# FastAPI / ASGI
+# =========================
+*.log
+logs/
+*.pid
+
+# =========================
+# Configurações sensíveis
+# =========================
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# =========================
+# Docker
+# =========================
+.dockerignore
+docker-compose.override.yml
+
+# =========================
+# IDEs / Editores
+# =========================
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# =========================
+# Sistema operacional
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Arquivos temporários
+# =========================
+tmp/
+temp/
+.cache/
+
+# =========================
+# Documentação gerada
+# =========================
+docs/_build/

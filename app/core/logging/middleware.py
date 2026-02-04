@@ -187,7 +187,3 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             )
 
             raise
-
-
-            raise
-
