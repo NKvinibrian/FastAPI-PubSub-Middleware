@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "datahub"
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
+    SECRET_KEY: str
 
     @property
     def DATABASE_URL(self) -> str:

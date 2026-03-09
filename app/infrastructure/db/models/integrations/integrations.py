@@ -13,7 +13,8 @@ class Integrations(Base, DefaultAttributesModel):
     name = Column(String(100), index=True)
     type_api = Column(String(50), nullable=False)
     base_url = Column(String(100), nullable=False)
-    timeout = Column(Time, nullable=False, default=500)
+    # timeout = Column(Time, nullable=False, default=500)
+    timeout = Column(Integer, nullable=False, default=500)
 
     # If true, will use a generic fetcher
     generic_fetcher = Column(BOOLEAN, nullable=False, default=False)
