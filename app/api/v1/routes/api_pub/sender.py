@@ -16,7 +16,7 @@ from app.domain.protocol.pubsub.pubsub import PubSubProtocol
 
 router = APIRouter(
     prefix='/pub',
-    tags=['pub', 'sender', 'publish']
+    tags=['publish']
 )
 
 

@@ -14,7 +14,7 @@ from app.api.v1.schemas.api_sub.receiver import PubSub
 
 router = APIRouter(
     prefix='/sub',
-    tags=['sub', 'receiver', 'subscription']
+    tags=['subscription']
 )
 
 

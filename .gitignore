@@ -80,3 +80,9 @@ temp/
 # Documentação gerada
 # =========================
 docs/_build/
+
+# =========================
+# Docker volume
+# =========================
+pg-data/
+mongo-data/
