@@ -44,6 +44,10 @@ class IntegrationsRepositoryProtocol(Protocol):
         """Busca uma integração pelo nome."""
         ...
 
+    def get_by_name_with_auth(self, name: str) -> Optional[IntegrationEntity]:
+        """Busca uma integração pelo nome, incluindo os dados de autenticação."""
+        ...
+
 
 class AuthProviderRepositoryProtocol(Protocol):
     """

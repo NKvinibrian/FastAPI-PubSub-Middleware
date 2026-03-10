@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from app.domain.entities.auth.auth_provider import AuthEntity
+
 
 @dataclass
 class IntegrationEntity:
@@ -12,4 +14,4 @@ class IntegrationEntity:
 
 @dataclass
 class IntegrationWithAuthEntity(IntegrationEntity):
-    auth: str
+    auth: AuthEntity

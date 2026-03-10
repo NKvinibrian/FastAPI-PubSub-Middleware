@@ -7,8 +7,16 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.domain.entities.auth.auth_provider import AuthEntity
+# Entity
 from app.domain.entities.integrations.integration import IntegrationEntity
+from app.domain.entities.integrations.integration import IntegrationWithAuthEntity
+
+# Models
 from app.infrastructure.db.models.integrations.integrations import Integrations
+from app.infrastructure.db.models.integrations.auth_provider import AuthProvider
+
+# Protocols
 from app.domain.protocol.integrations.repository import IntegrationsRepositoryProtocol
 
 
@@ -32,6 +40,29 @@ class IntegrationsRepository(IntegrationsRepositoryProtocol):
             timeout=integration.timeout,
             generic_fetcher=integration.generic_fetcher
         )
+
+    @staticmethod
+    def __map_to_entity_with_auth(integration: Integrations, auth: AuthProvider) -> IntegrationWithAuthEntity:
+        auth_entity = AuthEntity(
+            id=auth.id,
+            integration_id=auth.integration_id,
+            auth_type=auth.auth_type,
+            username=auth.username,
+            password=auth.password,
+            token=auth.token,
+            auth_endpoint=auth.auth_endpoint,
+            response_type=auth.response_type
+        )
+        integration = IntegrationWithAuthEntity(
+            id=integration.id,
+            name=integration.name,
+            type_api=integration.type_api,
+            base_url=integration.base_url,
+            timeout=integration.timeout,
+            generic_fetcher=integration.generic_fetcher,
+            auth=auth_entity
+        )
+        return integration
 
     def get_all(self) -> list[IntegrationEntity]:
         results = self._db.scalars(select(Integrations)).all()
@@ -72,9 +103,12 @@ class IntegrationsRepository(IntegrationsRepositoryProtocol):
         return self.__map_to_entity(result)
 
     def get_by_name_with_auth(self, name: str) -> Optional[IntegrationEntity]:
-        result = self._db.scalars(
-            select(Integrations).where(Integrations.name == name)
+        auth_result, integration_result = self._db.scalars(
+            select(AuthProvider).join(
+                Integrations,
+                AuthProvider.integration_id == Integrations.id
+            ).where(Integrations.name == name)
         ).first()
-        if result is None:
+        if integration_result is None:
             return None
-        return self.__map_to_entity(result)
+        return self.__map_to_entity_with_auth(integration=integration_result, auth=auth_result)
