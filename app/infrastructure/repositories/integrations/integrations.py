@@ -89,9 +89,11 @@ class IntegrationsRepository(IntegrationsRepositoryProtocol):
         return merged
 
     def delete(self, integration_id: int) -> None:
-        integration = self.get_by_id(integration_id)
-        if integration:
-            self._db.delete(integration)
+        result = self._db.scalars(
+            select(Integrations).where(Integrations.id == integration_id)
+        ).first()
+        if result is not None:
+            result.status = False
             self._db.commit()
 
     def get_by_name(self, name: str) -> Optional[IntegrationEntity]:
@@ -102,13 +104,14 @@ class IntegrationsRepository(IntegrationsRepositoryProtocol):
             return None
         return self.__map_to_entity(result)
 
-    def get_by_name_with_auth(self, name: str) -> Optional[IntegrationEntity]:
-        auth_result, integration_result = self._db.scalars(
-            select(AuthProvider).join(
-                Integrations,
-                AuthProvider.integration_id == Integrations.id
-            ).where(Integrations.name == name)
-        ).first()
-        if integration_result is None:
+    def get_by_name_with_auth(self, name: str) -> Optional[IntegrationWithAuthEntity]:
+        stmt = (
+            select(Integrations, AuthProvider)
+            .join(AuthProvider, AuthProvider.integration_id == Integrations.id)
+            .where(Integrations.name == name)
+        )
+        row = self._db.execute(stmt).first()
+        if row is None:
             return None
+        integration_result, auth_result = row
         return self.__map_to_entity_with_auth(integration=integration_result, auth=auth_result)

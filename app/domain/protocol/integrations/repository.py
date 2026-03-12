@@ -14,7 +14,7 @@ from typing import Protocol, Optional
 from app.infrastructure.db.models.integrations.integrations import Integrations
 from app.infrastructure.db.models.integrations.auth_provider import AuthProvider
 from app.infrastructure.db.models.integrations.integrations_requests_details import RequestDetails
-from app.domain.entities.integrations.integration import IntegrationEntity
+from app.domain.entities.integrations.integration import IntegrationEntity, IntegrationWithAuthEntity
 
 
 class IntegrationsRepositoryProtocol(Protocol):
@@ -44,7 +44,7 @@ class IntegrationsRepositoryProtocol(Protocol):
         """Busca uma integração pelo nome."""
         ...
 
-    def get_by_name_with_auth(self, name: str) -> Optional[IntegrationEntity]:
+    def get_by_name_with_auth(self, name: str) -> Optional[IntegrationWithAuthEntity]:
         """Busca uma integração pelo nome, incluindo os dados de autenticação."""
         ...
 

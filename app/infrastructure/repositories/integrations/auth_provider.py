@@ -78,6 +78,6 @@ class AuthProviderRepository(AuthProviderRepositoryProtocol):
         provider = self._db.query(AuthProvider).filter(
             AuthProvider.id == auth_provider_id
         ).first()
-        if provider:
-            self._db.delete(provider)
+        if provider is not None:
+            provider.status = False
             self._db.commit()

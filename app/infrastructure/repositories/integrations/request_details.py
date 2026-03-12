@@ -46,6 +46,6 @@ class RequestDetailsRepository(RequestDetailsRepositoryProtocol):
 
     def delete(self, request_details_id: str) -> None:
         request_details = self.get_by_id(request_details_id)
-        if request_details:
-            self._db.delete(request_details)
+        if request_details is not None:
+            request_details.status = False
             self._db.commit()

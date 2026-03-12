@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey
+from sqlalchemy import Column, String, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import JSONB
 from app.infrastructure.db import Base
 from app.infrastructure.db.models.default_datahub.default_table import DefaultAttributesModel
@@ -14,7 +14,7 @@ class AuthProvider(Base, DefaultAttributesModel):
         {"schema": "hub"}
     )
 
-    id = Column(String(255), primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True)
     integration_id = Column(ForeignKey(Integrations.id, ondelete="CASCADE"), nullable=False)
     auth_endpoint = Column(String(255), nullable=False)
 
