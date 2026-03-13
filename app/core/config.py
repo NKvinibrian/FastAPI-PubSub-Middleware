@@ -31,6 +31,7 @@ class Settings(BaseSettings):
         POSTGRES_HOST: Host do PostgreSQL
         POSTGRES_PORT: Porta do PostgreSQL
     """
+    ENV: str
     GCP_PROJECT_ID: str
     GCP_CREDENTIALS_PATH: str
     MONGO_URI: str
@@ -42,7 +43,10 @@ class Settings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     SECRET_KEY: str
+
+    # Mocks
     MOCK_WHOLESALER: bool = False
+    MOCK_PUBSUB: bool = False
 
     @property
     def DATABASE_URL(self) -> str:

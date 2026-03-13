@@ -11,17 +11,25 @@ Funções:
     get_logging_service: Retorna uma instância do serviço de logging
 """
 
-from app.domain.protocol.pubsub.pubsub import PubSubProtocol
 from app.infrastructure.pubsub.pubsub import PubSubPublisher
-
-from app.domain.protocol.ExampleIntegration.integration import ExampleIntegrationProtocol
 from app.domain.services.integration_example.integration import ExampleIntegrationService
-
 from app.infrastructure.repositories.logging.mongo import MongoLoggingRepository
 from app.core.logging.logger import MongoLoggingService
 from app.core.config import get_settings
-
+from app.infrastructure.vans.fetcher.graphql_fetcher import GraphQLFetcher
+from app.infrastructure.vans.integrations.fidelize_funcional.wholesaler_fetcher import (FidelizeWholesalerFetcher,)
 from app.core import mongo
+from app.infrastructure.vans.connectors.graphql_connector import GraphQLConnector
+
+# Protocol imports
+from app.domain.protocol.pubsub.pubsub import PubSubProtocol
+from app.domain.protocol.ExampleIntegration.integration import ExampleIntegrationProtocol
+from app.tests.mocks.datasul.datasul import MockDatasulService
+from app.domain.protocol.datasul.datasul import DatasulProtocol
+
+# Mocks imports
+from app.tests.mocks.pubsub.mock_pubsub import MockPubSubPublisher
+from app.infrastructure.vans.connectors.mock_wholesaler import MockWholesalerConnector # fixme: Esse mock tem que estar na pasta Test
 
 
 def get_pubsub() -> PubSubProtocol:
@@ -31,7 +39,13 @@ def get_pubsub() -> PubSubProtocol:
     Returns:
         PubSubProtocol: Implementação do protocolo de Pub/Sub
     """
-    return PubSubPublisher()
+
+    settings = get_settings()
+
+    if settings.MOCK_PUBSUB:
+        return MockPubSubPublisher()
+    else:
+        return PubSubPublisher()
 
 
 def get_example_integration() -> ExampleIntegrationProtocol:
@@ -43,6 +57,8 @@ def get_example_integration() -> ExampleIntegrationProtocol:
     """
     return ExampleIntegrationService()
 
+def get_datasul_service() -> DatasulProtocol:
+    return MockDatasulService() # Mock because i dont create the real service yet
 
 def get_logging_repository():
     """
@@ -78,18 +94,13 @@ def get_wholesaler_fetcher(auth_context):
     Returns:
         FidelizeWholesalerFetcher configurado.
     """
-    from app.infrastructure.vans.fetcher.graphql_fetcher import GraphQLFetcher
-    from app.infrastructure.vans.integrations.fidelize_funcional.wholesaler_fetcher import (
-        FidelizeWholesalerFetcher,
-    )
+
 
     settings = get_settings()
 
     if settings.MOCK_WHOLESALER:
-        from app.infrastructure.vans.connectors.mock_wholesaler import MockWholesalerConnector
         connector = MockWholesalerConnector()
     else:
-        from app.infrastructure.vans.connectors.graphql_connector import GraphQLConnector
         connector = GraphQLConnector(auth_context=auth_context)
 
     graphql_fetcher = GraphQLFetcher(connector=connector)

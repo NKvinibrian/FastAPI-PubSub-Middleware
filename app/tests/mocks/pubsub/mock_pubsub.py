@@ -19,7 +19,7 @@ from typing import List, Tuple, Callable
 from app.api.v1.schemas.api_sub.receiver import PubSub, PubSubMessage, PubSubAttributes
 from edwh_uuid7 import uuid7
 from main import app
-from app.core.dependencies import get_example_integration
+from app.core.dependencies import get_example_integration, get_datasul_service
 import base64
 import time
 import logging
@@ -47,6 +47,13 @@ topics: dict[str, List[Subscriber]] = {
             subscription="sub_1",
             url="/sub/example-subscribe-message",
             dependency=get_example_integration
+        ),
+    ],
+    "vans_pre_pedido_datasul": [
+        Subscriber(
+            subscription="vans_sub_pre_pedido_datasul",
+            url="/datasul-subscribe/pre-pedido-datasul",
+            dependency=get_datasul_service
         ),
     ]
 }
