@@ -21,8 +21,6 @@ from app.infrastructure.db import SessionLocal
 from app.infrastructure.vans.auth.setup_contex import SetupContext
 
 # Connectors / Fetchers
-from app.infrastructure.vans.connectors.graphql_connector import GraphQLConnector
-from app.infrastructure.vans.fetcher.graphql_fetcher import GraphQLFetcher
 from app.infrastructure.vans.integrations.fidelize_funcional.wholesaler_fetcher import (
     FidelizeWholesalerFetcher,
 )
@@ -35,8 +33,8 @@ from app.infrastructure.vans.pubsub.pre_pedido_publisher import PrePedidoPubSubP
 from app.core.dependencies import get_pubsub, get_wholesaler_fetcher
 
 # Repositories
-from app.infrastructure.repositories.logs.vans import LogPrePedidosVansRepository
-from app.infrastructure.repositories.logs.integrations import IntegrationLogRepository
+from app.infrastructure.repositories.logging.vans import LogPrePedidosVansRepository
+from app.infrastructure.repositories.logging.integrations import IntegrationLogRepository
 
 # Logger helper
 from app.domain.services.vans.integration_logger import IntegrationLogger
