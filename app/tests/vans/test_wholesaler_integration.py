@@ -252,15 +252,15 @@ class TestMockFetcher:
 
     @pytest.mark.asyncio
     async def test_get_pre_orders_san(self, fetcher):
-        """Busca pedidos com industry_code=SAN retorna os 2 pedidos SAN."""
-        orders = await fetcher.get_pre_orders(industry_code="SAN")
+        """Busca pedidos com context=SAN retorna os 2 pedidos SAN."""
+        orders = await fetcher.get_pre_orders(context="SAN")
         assert len(orders) == 2
         assert all(o["industry_code"] == "SAN" for o in orders)
 
     @pytest.mark.asyncio
     async def test_get_pre_orders_rch(self, fetcher):
-        """Busca pedidos com industry_code=RCH retorna 1 pedido."""
-        orders = await fetcher.get_pre_orders(industry_code="RCH")
+        """Busca pedidos com context=RCH retorna 1 pedido."""
+        orders = await fetcher.get_pre_orders(context="RCH")
         assert len(orders) == 1
         assert orders[0]["industry_code"] == "RCH"
         assert orders[0]["order_code"] == 5003
@@ -268,13 +268,13 @@ class TestMockFetcher:
     @pytest.mark.asyncio
     async def test_get_pre_orders_unknown_industry_returns_empty(self, fetcher):
         """Industry code sem pedidos retorna lista vazia."""
-        orders = await fetcher.get_pre_orders(industry_code="XXX")
+        orders = await fetcher.get_pre_orders(context="XXX")
         assert orders == []
 
     @pytest.mark.asyncio
     async def test_get_pre_orders_returns_products(self, fetcher):
         """Os pedidos retornados contêm produtos com todos os campos."""
-        orders = await fetcher.get_pre_orders(industry_code="SAN")
+        orders = await fetcher.get_pre_orders(context="SAN")
         products = orders[0]["products"]
         assert len(products) == 2
         assert products[0]["ean"] == "7899640800117"
@@ -291,33 +291,30 @@ class TestMockConfirm:
     @pytest.mark.asyncio
     async def test_confirm_marks_orders_as_imported(self, fetcher):
         """Após confirmar, os pedidos não aparecem mais na query."""
-        # Busca antes
-        before = await fetcher.get_pre_orders(industry_code="SAN")
+        before = await fetcher.get_pre_orders(context="SAN")
         assert len(before) == 2
 
-        # Confirma
         codes = [o["order_code"] for o in before]
-        await fetcher.set_orders_as_imported(order_codes=codes, industry_code="SAN")
+        await fetcher.set_orders_as_imported(order_codes=codes, context="SAN")
 
-        # Busca depois
-        after = await fetcher.get_pre_orders(industry_code="SAN")
+        after = await fetcher.get_pre_orders(context="SAN")
         assert len(after) == 0
 
     @pytest.mark.asyncio
     async def test_confirm_partial(self, fetcher):
         """Confirma só 1 pedido — o outro continua disponível."""
-        await fetcher.set_orders_as_imported(order_codes=[5001], industry_code="SAN")
+        await fetcher.set_orders_as_imported(order_codes=[5001], context="SAN")
 
-        remaining = await fetcher.get_pre_orders(industry_code="SAN")
+        remaining = await fetcher.get_pre_orders(context="SAN")
         assert len(remaining) == 1
         assert remaining[0]["order_code"] == 5002
 
     @pytest.mark.asyncio
     async def test_confirm_does_not_affect_other_industry(self, fetcher):
         """Confirmar SAN não afeta pedidos RCH."""
-        await fetcher.set_orders_as_imported(order_codes=[5001, 5002], industry_code="SAN")
+        await fetcher.set_orders_as_imported(order_codes=[5001, 5002], context="SAN")
 
-        rch = await fetcher.get_pre_orders(industry_code="RCH")
+        rch = await fetcher.get_pre_orders(context="RCH")
         assert len(rch) == 1
 
 
@@ -330,7 +327,7 @@ class TestMockParser:
     @pytest.mark.asyncio
     async def test_parse_orders_from_mock(self, fetcher, parser):
         """Pedidos vindos do mock são parseados corretamente."""
-        raw = await fetcher.get_pre_orders(industry_code="SAN")
+        raw = await fetcher.get_pre_orders(context="SAN")
         parsed = parser.parse(raw)
 
         assert len(parsed) == 2
@@ -342,7 +339,7 @@ class TestMockParser:
     @pytest.mark.asyncio
     async def test_parse_creates_logs(self, fetcher, parser, log_prepedidos_repo):
         """Cada pedido parseado gera um LogPrePedidosVans."""
-        raw = await fetcher.get_pre_orders(industry_code="SAN")
+        raw = await fetcher.get_pre_orders(context="SAN")
         parser.parse(raw)
 
         logs = log_prepedidos_repo.get_all()
@@ -352,7 +349,7 @@ class TestMockParser:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  5. Pipeline completo — fetch → parse → publish → confirm
+#  5. Pipeline completo — fetch → parse → publish (confirm no subscriber)
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestMockFullPipeline:
@@ -370,18 +367,18 @@ class TestMockFullPipeline:
         log_uuid,
     ):
         """
-        Fluxo completo para SAN:
+        Fluxo completo para SAN (pipeline):
         1. Fetch → 2 pedidos
         2. Parse → 2 PrePedidoSchema
         3. Publish → 2 mensagens no PubSub
-        4. Confirm → pedidos desaparecem
+        O confirm acontece no subscriber do Datasul.
         """
         # ── FETCH ──
         fetch_log = integration_logger.start(
             component_name="fetcher",
             process_name="FidelizeWholesalerFetcher.get_pre_orders",
         )
-        raw_orders = await fetcher.get_pre_orders(industry_code="SAN")
+        raw_orders = await fetcher.get_pre_orders(context="SAN")
         assert len(raw_orders) == 2
         integration_logger.success(fetch_log, message_text=f"Fetched {len(raw_orders)}")
 
@@ -405,24 +402,11 @@ class TestMockFullPipeline:
         assert len(msg_ids) == 2
         integration_logger.success(pub_log, message_text=f"Published {len(msg_ids)}")
 
-        # ── CONFIRM ──
-        confirm_log = integration_logger.start(
-            component_name="confirm",
-            process_name="FidelizeWholesalerFetcher.set_orders_as_imported",
-        )
-        order_codes = [o.order_code for o in parsed]
-        await fetcher.set_orders_as_imported(order_codes=order_codes, industry_code="SAN")
-        integration_logger.success(confirm_log, message_text="Confirmed")
-
         # ── ASSERTIONS ──
 
-        # Pedidos sumiram da VAN
-        remaining = await fetcher.get_pre_orders(industry_code="SAN")
-        assert len(remaining) == 0
-
-        # RCH não foi afetado
-        rch = await fetcher.get_pre_orders(industry_code="RCH")
-        assert len(rch) == 1
+        # Pedidos ainda estão na VAN (confirm no subscriber)
+        remaining = await fetcher.get_pre_orders(context="SAN")
+        assert len(remaining) == 2
 
         # LogPrePedidosVans: 2 logs com status PUBLISHED
         pedido_logs = log_prepedidos_repo.get_all()
@@ -430,12 +414,12 @@ class TestMockFullPipeline:
         assert all(l.integration_status == "PUBLISHED" for l in pedido_logs)
         assert all(l.message_id is not None for l in pedido_logs)
 
-        # IntegrationLog: 4 etapas com status SUCCESS
+        # IntegrationLog: 3 etapas com status SUCCESS (fetch, parse, pubsub)
         int_logs = integration_log_repo.get_all()
-        assert len(int_logs) == 4
+        assert len(int_logs) == 3
         assert all(l.status == "SUCCESS" for l in int_logs)
         components = {l.component_name for l in int_logs}
-        assert components == {"fetcher", "parser", "pubsub", "confirm"}
+        assert components == {"fetcher", "parser", "pubsub"}
 
         # PubSub: 2 mensagens
         assert len(mock_pubsub.messages) == 2
@@ -447,17 +431,15 @@ class TestMockFullPipeline:
         self, fetcher, parser, publisher, log_uuid, mock_pubsub, log_prepedidos_repo,
     ):
         """
-        Roda o pipeline para SAN e RCH sequencialmente
-        (como o job faz no loop de industry_codes).
+        Roda o pipeline (fetch → parse → publish) para SAN e RCH.
+        Confirm acontece no subscriber, não aqui.
         """
         total_parsed = []
 
         for industry in ["SAN", "RCH"]:
-            raw = await fetcher.get_pre_orders(industry_code=industry)
+            raw = await fetcher.get_pre_orders(context=industry)
             parsed = parser.parse(raw)
             await publisher.publish(orders=parsed, log_uuid=log_uuid)
-            codes = [o.order_code for o in parsed]
-            await fetcher.set_orders_as_imported(order_codes=codes, industry_code=industry)
             total_parsed.extend(parsed)
 
         # 3 pedidos no total (2 SAN + 1 RCH)
@@ -465,7 +447,4 @@ class TestMockFullPipeline:
         assert len(mock_pubsub.messages) == 3
         assert len(log_prepedidos_repo.get_all()) == 3
 
-        # Todos confirmados — nada mais disponível
-        assert await fetcher.get_pre_orders(industry_code="SAN") == []
-        assert await fetcher.get_pre_orders(industry_code="RCH") == []
 

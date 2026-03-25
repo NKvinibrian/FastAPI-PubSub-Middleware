@@ -24,26 +24,31 @@ from app.infrastructure.vans.connectors.graphql_connector import GraphQLConnecto
 # Protocol imports
 from app.domain.protocol.pubsub.pubsub import PubSubProtocol
 from app.domain.protocol.ExampleIntegration.integration import ExampleIntegrationProtocol
-from app.tests.mocks.datasul.datasul import MockDatasulService
 from app.domain.protocol.datasul.datasul import DatasulProtocol
+from app.domain.protocol.vans.van_fetcher import VanFetcherProtocol
 
-# Mocks imports
-from app.tests.mocks.pubsub.mock_pubsub import MockPubSubPublisher
-from app.infrastructure.vans.connectors.mock_wholesaler import MockWholesalerConnector # fixme: Esse mock tem que estar na pasta Test
+# NOTE: MockPubSubPublisher e MockDatasulService são importados de forma lazy
+# dentro das funções que os usam, para evitar circular import (mock_pubsub importa main.py).
 
 
 def get_pubsub() -> PubSubProtocol:
     """
     Retorna uma instância do serviço de publicação Pub/Sub.
 
+    - MOCK_PUBSUB=false  → PubSubPublisher real (GCP)
+    - MOCK_PUBSUB=true   → DevPubSubPublisher (leve, sem rede, para jobs em dev)
+
+    Para testes de integração HTTP com entrega real ao endpoint FastAPI,
+    use MockPubSubPublisher diretamente via override de dependência.
+
     Returns:
         PubSubProtocol: Implementação do protocolo de Pub/Sub
     """
-
     settings = get_settings()
 
     if settings.MOCK_PUBSUB:
-        return MockPubSubPublisher()
+        from app.infrastructure.pubsub.dev_pubsub import DevPubSubPublisher
+        return DevPubSubPublisher()
     else:
         return PubSubPublisher()
 
@@ -58,7 +63,8 @@ def get_example_integration() -> ExampleIntegrationProtocol:
     return ExampleIntegrationService()
 
 def get_datasul_service() -> DatasulProtocol:
-    return MockDatasulService() # Mock because i dont create the real service yet
+    from app.tests.mocks.datasul.datasul import MockDatasulService
+    return MockDatasulService()  # Mock because i dont create the real service yet
 
 def get_logging_repository():
     """
@@ -99,11 +105,58 @@ def get_wholesaler_fetcher(auth_context):
     settings = get_settings()
 
     if settings.MOCK_WHOLESALER:
+        from app.infrastructure.vans.connectors.mock_wholesaler import MockWholesalerConnector
         connector = MockWholesalerConnector()
     else:
         connector = GraphQLConnector(auth_context=auth_context)
 
     graphql_fetcher = GraphQLFetcher(connector=connector)
     return FidelizeWholesalerFetcher(fetcher=graphql_fetcher)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Registry de VANs para confirm (usado pelo subscriber do Datasul)
+# ═══════════════════════════════════════════════════════════════════════
+
+# Mapeia origin_system → integration_name no banco
+_VAN_REGISTRY: dict[str, str] = {
+    "Fidelize Funcional Wholesaler": "Fidelize Funcional Wholesaler",
+    # Adicionar novas VANs aqui:
+    # "Interplayers Wholesaler": "Interplayers Wholesaler",
+    # "IQVIA OL Ecommerce": "IQVIA OL Ecommerce",
+}
+
+
+def get_van_confirmer(origin_system: str) -> VanFetcherProtocol:
+    """
+    Retorna o fetcher da VAN correspondente ao origin_system.
+
+    Usado pelo subscriber do Datasul para confirmar pedidos
+    como importados na VAN de origem após aceite.
+
+    Args:
+        origin_system: Nome do sistema de origem (vem do PubSub attributes).
+
+    Returns:
+        VanFetcherProtocol configurado para a VAN.
+
+    Raises:
+        ValueError: Se o origin_system não está registrado.
+    """
+    integration_name = _VAN_REGISTRY.get(origin_system)
+    if not integration_name:
+        raise ValueError(
+            f"VAN desconhecida para confirm: '{origin_system}'. "
+            f"Registre em _VAN_REGISTRY no dependencies.py."
+        )
+
+    from app.infrastructure.db import SessionLocal
+    from app.infrastructure.vans.auth.setup_contex import SetupContext
+
+    db = SessionLocal()
+    setup = SetupContext(db=db)
+    van_context = setup.load(integration_name)
+
+    return get_wholesaler_fetcher(auth_context=van_context.auth)
 
 

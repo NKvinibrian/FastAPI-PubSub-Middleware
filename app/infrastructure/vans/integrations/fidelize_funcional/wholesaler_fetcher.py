@@ -3,12 +3,15 @@ Fetcher V2 para Fidelize Funcional Wholesaler.
 
 Utiliza o GraphQLFetcher (conector limpo) para buscar pedidos
 e confirmar importação. Não conhece banco, logging ou parsing.
+
+Implementa VanFetcherProtocol — o parâmetro `context` corresponde
+ao `industry_code` desta integração específica.
 """
 
 import asyncio
-from typing import Any
+from typing import Any, Optional
 
-from app.infrastructure.vans.fetcher.graphql_fetcher import GraphQLFetcher
+from app.domain.protocol.vans.fetcher import GraphQLFetcherProtocol
 
 
 class FidelizeWholesalerFetcher:
@@ -16,26 +19,29 @@ class FidelizeWholesalerFetcher:
     Fetcher específico para a integração Fidelize Funcional Wholesaler.
 
     Encapsula as queries/mutations GraphQL do manual Wholesaler v2.2.
-    Delega o transporte ao GraphQLFetcher injetado.
+    Delega o transporte ao GraphQLFetcherProtocol injetado — aceita
+    qualquer implementação real ou mock.
 
     Attributes:
-        _fetcher: GraphQLFetcher configurado com AuthContext da Fidelize.
+        _fetcher: Implementação de GraphQLFetcherProtocol.
     """
 
-    def __init__(self, fetcher: GraphQLFetcher) -> None:
+    def __init__(self, fetcher: GraphQLFetcherProtocol) -> None:
         self._fetcher = fetcher
 
     async def get_pre_orders(
         self,
-        industry_code: str,
+        context: Optional[Any] = None,
         page: int = 1,
         per_page: int = 100,
     ) -> list[dict[str, Any]]:
         """
         Consulta pedidos disponíveis (não importados) na Fidelize.
 
+        Implementa VanFetcherProtocol — `context` é o industry_code.
+
         Args:
-            industry_code: Código da indústria (ex: FAB, SAN, RCH).
+            context: Código da indústria (ex: SAN, RCH). Mapeado de VanFetcherProtocol.
             page: Página atual para paginação.
             per_page: Quantidade de pedidos por página.
 
@@ -45,6 +51,8 @@ class FidelizeWholesalerFetcher:
         Raises:
             RuntimeError: Se a resposta GraphQL contiver erros.
         """
+        industry_code: str = context or ""
+
         query = f"""
         query {{
           orders(
@@ -113,18 +121,21 @@ class FidelizeWholesalerFetcher:
     async def set_orders_as_imported(
         self,
         order_codes: list[int | str],
-        industry_code: str,
+        context: Optional[Any] = None,
     ) -> None:
         """
         Marca pedidos como importados na Fidelize (setOrderAsImported).
 
+        Implementa VanFetcherProtocol — `context` é o industry_code.
+
         Args:
             order_codes: Lista de order_codes a confirmar.
-            industry_code: Código da indústria.
+            context: Código da indústria. Mapeado de VanFetcherProtocol.
 
         Raises:
             RuntimeError: Se alguma mutation falhar.
         """
+        industry_code: str = context or ""
 
         async def _confirm(order_code: int | str) -> dict[str, Any]:
             mutation = f"""

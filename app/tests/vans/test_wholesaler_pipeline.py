@@ -9,10 +9,10 @@ Cobertura:
   2. OrderParser — salva LogPrePedidosVans por pedido
   3. PrePedidoPubSubPublisher — publica 1 mensagem por pedido
   4. PrePedidoPubSubPublisher — atualiza log com message_id
-  5. FidelizeWholesalerFetcher — monta query correta
+  5. FidelizeWholesalerFetcher — monta query correta (usa context=)
   6. FidelizeWholesalerFetcher — confirma pedidos (setOrderAsImported)
   7. IntegrationLogger — registra start/success/fail
-  8. Pipeline completo — fetch → parse → publish → confirm
+  8. Pipeline completo via VanPipeline genérica — fetch → parse → publish → confirm
 """
 
 import pytest
@@ -26,6 +26,7 @@ from app.infrastructure.vans.integrations.fidelize_funcional.wholesaler_fetcher 
     FidelizeWholesalerFetcher,
 )
 from app.infrastructure.vans.pubsub.pre_pedido_publisher import PrePedidoPubSubPublisher
+from app.pipelines.vans.van_pipeline import VanPipeline
 
 from app.tests.mocks.vans.mocks import (
     MockLogPrePedidosVansRepository,
@@ -309,7 +310,7 @@ class TestFidelizeWholesalerFetcher:
     async def test_get_pre_orders_returns_list(self):
         mock_fetcher = MockGraphQLFetcher(responses=[SAMPLE_RAW_ORDERS])
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_fetcher)
-        result = await fetcher.get_pre_orders(industry_code="SAN")
+        result = await fetcher.get_pre_orders(context="SAN")
         assert isinstance(result, list)
         assert len(result) == 2
 
@@ -317,7 +318,7 @@ class TestFidelizeWholesalerFetcher:
     async def test_get_pre_orders_passes_extract_path(self):
         mock_fetcher = MockGraphQLFetcher(responses=[[]])
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_fetcher)
-        await fetcher.get_pre_orders(industry_code="SAN")
+        await fetcher.get_pre_orders(context="SAN")
         call = mock_fetcher.calls[0]
         assert call["extract_path"] == ["orders", "data"]
 
@@ -325,7 +326,7 @@ class TestFidelizeWholesalerFetcher:
     async def test_get_pre_orders_query_contains_industry_code(self):
         mock_fetcher = MockGraphQLFetcher(responses=[[]])
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_fetcher)
-        await fetcher.get_pre_orders(industry_code="FAB")
+        await fetcher.get_pre_orders(context="FAB")
         query = mock_fetcher.calls[0]["query"]
         assert '"FAB"' in query
 
@@ -333,7 +334,7 @@ class TestFidelizeWholesalerFetcher:
     async def test_get_pre_orders_query_contains_key_fields(self):
         mock_fetcher = MockGraphQLFetcher(responses=[[]])
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_fetcher)
-        await fetcher.get_pre_orders(industry_code="SAN")
+        await fetcher.get_pre_orders(context="SAN")
         query = mock_fetcher.calls[0]["query"]
         assert "order_code" in query
         assert "customer_code" in query
@@ -344,7 +345,7 @@ class TestFidelizeWholesalerFetcher:
     async def test_get_pre_orders_empty_response_returns_empty_list(self):
         mock_fetcher = MockGraphQLFetcher(responses=[None])
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_fetcher)
-        result = await fetcher.get_pre_orders(industry_code="SAN")
+        result = await fetcher.get_pre_orders(context="SAN")
         assert result == []
 
     @pytest.mark.asyncio
@@ -355,7 +356,7 @@ class TestFidelizeWholesalerFetcher:
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_fetcher)
         await fetcher.set_orders_as_imported(
             order_codes=["5001", "5002", "5003"],
-            industry_code="SAN",
+            context="SAN",
         )
         assert len(mock_fetcher.calls) == 3
 
@@ -365,7 +366,7 @@ class TestFidelizeWholesalerFetcher:
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_fetcher)
         await fetcher.set_orders_as_imported(
             order_codes=["5001"],
-            industry_code="SAN",
+            context="SAN",
         )
         query = mock_fetcher.calls[0]["query"]
         assert "setOrderAsImported" in query
@@ -375,7 +376,7 @@ class TestFidelizeWholesalerFetcher:
     async def test_set_orders_as_imported_empty_list(self):
         mock_fetcher = MockGraphQLFetcher()
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_fetcher)
-        await fetcher.set_orders_as_imported(order_codes=[], industry_code="SAN")
+        await fetcher.set_orders_as_imported(order_codes=[], context="SAN")
         assert len(mock_fetcher.calls) == 0
 
     @pytest.mark.asyncio
@@ -387,7 +388,7 @@ class TestFidelizeWholesalerFetcher:
         with pytest.raises(RuntimeError, match="GraphQL error"):
             await fetcher.set_orders_as_imported(
                 order_codes=["5001"],
-                industry_code="SAN",
+                context="SAN",
             )
 
 
@@ -445,13 +446,13 @@ class TestIntegrationLogger:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  6. Pipeline completo — fetch → parse → publish → confirm
+#  6. Pipeline completo — fetch → parse → publish (confirm no sub)
 # ═══════════════════════════════════════════════════════════════════════
 
 class TestFullPipeline:
 
     @pytest.mark.asyncio
-    async def test_full_flow_fetch_parse_publish_confirm(
+    async def test_full_flow_fetch_parse_publish(
         self,
         parser,
         publisher,
@@ -462,15 +463,12 @@ class TestFullPipeline:
         log_uuid,
     ):
         """
-        Simula o pipeline completo como o wholesaler_fetcher_job.py faz,
-        usando mocks para todas as dependências externas.
+        Simula o pipeline completo: fetch → parse → publish.
+        O confirm acontece no subscriber do Datasul, não aqui.
         """
-        # ── Setup fetcher mock ──
         mock_graphql_fetcher = MockGraphQLFetcher(
             responses=[
                 deepcopy(SAMPLE_RAW_ORDERS),  # get_pre_orders
-                {"id": 1},  # set_orders_as_imported (order 5001)
-                {"id": 2},  # set_orders_as_imported (order 5002)
             ]
         )
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_graphql_fetcher)
@@ -480,7 +478,7 @@ class TestFullPipeline:
             component_name="fetcher",
             process_name="FidelizeWholesalerFetcher.get_pre_orders",
         )
-        raw_orders = await fetcher.get_pre_orders(industry_code="SAN")
+        raw_orders = await fetcher.get_pre_orders(context="SAN")
         assert len(raw_orders) == 2
         integration_logger.success(fetch_log, message_text=f"Fetched {len(raw_orders)} orders")
 
@@ -504,15 +502,6 @@ class TestFullPipeline:
         assert len(message_ids) == 2
         integration_logger.success(publish_log, message_text=f"Published {len(message_ids)} messages")
 
-        # ── CONFIRM ──
-        confirm_log = integration_logger.start(
-            component_name="confirm",
-            process_name="FidelizeWholesalerFetcher.set_orders_as_imported",
-        )
-        order_codes = [o.order_code for o in parsed_orders]
-        await fetcher.set_orders_as_imported(order_codes=order_codes, industry_code="SAN")
-        integration_logger.success(confirm_log, message_text="Confirmed")
-
         # ══ ASSERTIONS ══
 
         # LogPrePedidosVans: 2 logs criados (um por pedido)
@@ -521,23 +510,21 @@ class TestFullPipeline:
         assert all(l.integration_status == "PUBLISHED" for l in pedido_logs)
         assert all(l.message_id is not None for l in pedido_logs)
 
-        # IntegrationLog: 4 etapas (fetch, parse, publish, confirm) — cada uma criada e atualizada
+        # IntegrationLog: 3 etapas (fetch, parse, publish) — confirm no sub
         integration_logs = integration_log_repo.get_all()
-        assert len(integration_logs) == 4
-        # Todos devem ter status SUCCESS (foram atualizados de STARTED → SUCCESS)
+        assert len(integration_logs) == 3
         success_logs = [l for l in integration_logs if l.status == "SUCCESS"]
-        assert len(success_logs) == 4
+        assert len(success_logs) == 3
         components = [l.component_name for l in success_logs]
         assert "fetcher" in components
         assert "parser" in components
         assert "pubsub" in components
-        assert "confirm" in components
 
         # PubSub: 2 mensagens publicadas
         assert len(mock_pubsub.messages) == 2
 
-        # Fetcher: 3 chamadas (1 get_pre_orders + 2 set_orders_as_imported)
-        assert len(mock_graphql_fetcher.calls) == 3
+        # Fetcher: 1 chamada (só get_pre_orders, confirm no sub)
+        assert len(mock_graphql_fetcher.calls) == 1
 
     @pytest.mark.asyncio
     async def test_pipeline_with_empty_orders(
@@ -553,7 +540,7 @@ class TestFullPipeline:
         mock_graphql_fetcher = MockGraphQLFetcher(responses=[[]])
         fetcher = FidelizeWholesalerFetcher(fetcher=mock_graphql_fetcher)
 
-        raw_orders = await fetcher.get_pre_orders(industry_code="SAN")
+        raw_orders = await fetcher.get_pre_orders(context="SAN")
         assert raw_orders == []
 
         parsed = parser.parse(raw_orders)
@@ -583,7 +570,7 @@ class TestFullPipeline:
         )
 
         try:
-            await fetcher.get_pre_orders(industry_code="SAN")
+            await fetcher.get_pre_orders(context="SAN")
         except Exception as e:
             integration_logger.fail(fetch_log, error_details=repr(e))
 
@@ -591,4 +578,201 @@ class TestFullPipeline:
         failed = [l for l in logs if l.status == "FAILED"]
         assert len(failed) == 1
         assert "RuntimeError" in failed[0].error_details
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  7. VanPipeline genérica
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestVanPipeline:
+
+    def _make_fetcher(self, responses):
+        mock_gql = MockGraphQLFetcher(responses=responses)
+        return FidelizeWholesalerFetcher(fetcher=mock_gql), mock_gql
+
+    @pytest.mark.asyncio
+    async def test_pipeline_runs_one_context(
+        self,
+        parser,
+        publisher,
+        integration_logger,
+        log_prepedidos_repo,
+        mock_pubsub,
+        log_uuid,
+    ):
+        """VanPipeline com loop_fn=['SAN'] executa fetch → parse → publish."""
+        fetcher, mock_gql = self._make_fetcher([
+            deepcopy(SAMPLE_RAW_ORDERS),  # get_pre_orders SAN
+        ])
+
+        pipeline = VanPipeline(
+            fetcher=fetcher,
+            parser=parser,
+            publisher=publisher,
+            integration_logger=integration_logger,
+            loop_fn=lambda: ["SAN"],
+            log_uuid=log_uuid,
+        )
+
+        await pipeline.run()
+
+        assert len(mock_pubsub.messages) == 2
+        assert len(log_prepedidos_repo.get_all()) == 2
+        assert all(l.integration_status == "PUBLISHED" for l in log_prepedidos_repo.get_all())
+
+    @pytest.mark.asyncio
+    async def test_pipeline_runs_multiple_contexts(
+        self,
+        parser,
+        publisher,
+        integration_logger,
+        log_prepedidos_repo,
+        mock_pubsub,
+        log_uuid,
+    ):
+        """VanPipeline com loop_fn=['SAN','RCH'] executa para cada context."""
+        # SAN: 2 pedidos, RCH: 1 pedido (apenas o primeiro SAMPLE + versão recortada)
+        san_orders = deepcopy(SAMPLE_RAW_ORDERS)
+        rch_orders = [deepcopy(SAMPLE_RAW_ORDERS[0])]
+        rch_orders[0]["order_code"] = "6001"
+        rch_orders[0]["id"] = "99001"
+
+        fetcher, mock_gql = self._make_fetcher([
+            san_orders,      # get_pre_orders SAN
+            rch_orders,      # get_pre_orders RCH
+        ])
+
+        pipeline = VanPipeline(
+            fetcher=fetcher,
+            parser=parser,
+            publisher=publisher,
+            integration_logger=integration_logger,
+            loop_fn=lambda: ["SAN", "RCH"],
+            log_uuid=log_uuid,
+        )
+
+        await pipeline.run()
+
+        # 2 (SAN) + 1 (RCH) = 3 mensagens publicadas
+        assert len(mock_pubsub.messages) == 3
+        assert len(log_prepedidos_repo.get_all()) == 3
+
+    @pytest.mark.asyncio
+    async def test_pipeline_skips_context_with_no_orders(
+        self,
+        parser,
+        publisher,
+        integration_logger,
+        mock_pubsub,
+        log_uuid,
+    ):
+        """VanPipeline com resposta vazia não publica nem confirma."""
+        fetcher, mock_gql = self._make_fetcher([[]])  # retorna vazio
+
+        pipeline = VanPipeline(
+            fetcher=fetcher,
+            parser=parser,
+            publisher=publisher,
+            integration_logger=integration_logger,
+            loop_fn=lambda: ["SAN"],
+            log_uuid=log_uuid,
+        )
+
+        await pipeline.run()
+
+        assert len(mock_pubsub.messages) == 0
+        # Apenas 1 chamada ao fetcher (sem confirm)
+        assert len(mock_gql.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_pipeline_logs_all_stages(
+        self,
+        parser,
+        publisher,
+        integration_logger,
+        integration_log_repo,
+        log_uuid,
+    ):
+        """VanPipeline registra log para cada etapa do pipeline (fetch, parse, pubsub)."""
+        fetcher, _ = self._make_fetcher([
+            deepcopy(SAMPLE_RAW_ORDERS),
+        ])
+
+        pipeline = VanPipeline(
+            fetcher=fetcher,
+            parser=parser,
+            publisher=publisher,
+            integration_logger=integration_logger,
+            loop_fn=lambda: ["SAN"],
+            log_uuid=log_uuid,
+        )
+
+        await pipeline.run()
+
+        logs = integration_log_repo.get_all()
+        assert len(logs) == 3
+        components = {l.component_name for l in logs}
+        assert components == {"fetcher", "parser", "pubsub"}
+        assert all(l.status == "SUCCESS" for l in logs)
+
+    @pytest.mark.asyncio
+    async def test_pipeline_logs_fetch_failure(
+        self,
+        parser,
+        publisher,
+        integration_logger,
+        integration_log_repo,
+        mock_pubsub,
+        log_uuid,
+    ):
+        """VanPipeline registra FAILED quando o fetcher levanta exceção."""
+        fetcher, _ = self._make_fetcher([RuntimeError("timeout")])
+
+        pipeline = VanPipeline(
+            fetcher=fetcher,
+            parser=parser,
+            publisher=publisher,
+            integration_logger=integration_logger,
+            loop_fn=lambda: ["SAN"],
+            log_uuid=log_uuid,
+        )
+
+        await pipeline.run()  # Não deve propagar — pipeline captura internamente
+
+        logs = integration_log_repo.get_all()
+        failed = [l for l in logs if l.status == "FAILED"]
+        assert len(failed) == 1
+        assert failed[0].component_name == "fetcher"
+        # Nenhuma mensagem publicada
+        assert len(mock_pubsub.messages) == 0
+
+    @pytest.mark.asyncio
+    async def test_pipeline_without_loop_using_none_context(
+        self,
+        parser,
+        publisher,
+        integration_logger,
+        log_prepedidos_repo,
+        mock_pubsub,
+        log_uuid,
+    ):
+        """VanPipeline com loop_fn=[None] funciona para VANs sem loop."""
+        orders_no_industry = [deepcopy(SAMPLE_RAW_ORDERS[0])]
+        fetcher, _ = self._make_fetcher([orders_no_industry])
+
+        pipeline = VanPipeline(
+            fetcher=fetcher,
+            parser=parser,
+            publisher=publisher,
+            integration_logger=integration_logger,
+            loop_fn=lambda: [None],  # VAN sem loop
+            log_uuid=log_uuid,
+        )
+
+        await pipeline.run()
+
+        assert len(mock_pubsub.messages) == 1
+        assert len(log_prepedidos_repo.get_all()) == 1
+
+
 

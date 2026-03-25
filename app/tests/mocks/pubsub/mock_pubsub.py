@@ -55,7 +55,14 @@ topics: dict[str, List[Subscriber]] = {
             url="/datasul-subscribe/pre-pedido-datasul",
             dependency=get_datasul_service
         ),
-    ]
+    ],
+    "merco-prepedido-datasul": [
+        Subscriber(
+            subscription="vans_sub_pre_pedido_datasul",
+            url="/datasul-subscribe/pre-pedido-datasul",
+            dependency=get_datasul_service
+        ),
+    ],
 }
 
 
