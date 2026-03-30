@@ -36,10 +36,7 @@ def get_pubsub() -> PubSubProtocol:
     Retorna uma instância do serviço de publicação Pub/Sub.
 
     - MOCK_PUBSUB=false  → PubSubPublisher real (GCP)
-    - MOCK_PUBSUB=true   → DevPubSubPublisher (leve, sem rede, para jobs em dev)
-
-    Para testes de integração HTTP com entrega real ao endpoint FastAPI,
-    use MockPubSubPublisher diretamente via override de dependência.
+    - MOCK_PUBSUB=true   → MockPubSubPublisher (entrega via HTTP aos subscribers locais)
 
     Returns:
         PubSubProtocol: Implementação do protocolo de Pub/Sub
@@ -47,8 +44,8 @@ def get_pubsub() -> PubSubProtocol:
     settings = get_settings()
 
     if settings.MOCK_PUBSUB:
-        from app.infrastructure.pubsub.dev_pubsub import DevPubSubPublisher
-        return DevPubSubPublisher()
+        from app.tests.mocks.pubsub.mock_pubsub import MockPubSubPublisher
+        return MockPubSubPublisher()
     else:
         return PubSubPublisher()
 

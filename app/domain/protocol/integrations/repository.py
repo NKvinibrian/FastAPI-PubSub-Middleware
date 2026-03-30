@@ -105,6 +105,10 @@ class RequestDetailsRepositoryProtocol(Protocol):
         """Retorna todos os detalhes de requisição de uma integração."""
         ...
 
+    def get_by_integration_and_name(self, integration_id: int, name: str) -> Optional[RequestDetails]:
+        """Busca detalhes de requisição pelo integration_id e name (tipo)."""
+        ...
+
     def create(self, request_details: RequestDetails) -> RequestDetails:
         """Cria um novo detalhe de requisição."""
         ...

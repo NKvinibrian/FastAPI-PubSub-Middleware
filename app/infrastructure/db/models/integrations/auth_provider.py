@@ -16,7 +16,7 @@ class AuthProvider(Base, DefaultAttributesModel):
 
     id = Column(Integer, primary_key=True, index=True)
     integration_id = Column(ForeignKey(Integrations.id, ondelete="CASCADE"), nullable=False)
-    auth_endpoint = Column(String(255), nullable=False)
+    auth_endpoint = Column(String(255), nullable=True)
 
     # Case Login credentials
     username = Column(String(255), nullable=True)

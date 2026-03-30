@@ -9,6 +9,7 @@ Classes:
     RequestLoggingMiddleware: Middleware para logging automático de requisições
 """
 
+import logging
 import time
 from fastapi import Request
 from fastapi.responses import Response
@@ -18,6 +19,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.logging.logger import MongoLoggingService
 from app.core.logging.request import RequestLog
 from app.core.config import get_settings
+
+_mw_logger = logging.getLogger(__name__)
 
 Settings = get_settings()
 
@@ -140,50 +143,59 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
             headers = await self.capture_request_headers(request)
 
-            await self.logger.save(
-                RequestLog(
-                    method=request.method,
-                    path=request.url.path,
-                    status_code=response.status_code,
-                    success=response.status_code < 400,
-                    duration_ms=duration,
-                    response_body=captured_response.decode(Settings.BINARY_DECODE),
-                    headers=headers,
+            try:
+                await self.logger.save(
+                    RequestLog(
+                        method=request.method,
+                        path=request.url.path,
+                        status_code=response.status_code,
+                        success=response.status_code < 400,
+                        duration_ms=duration,
+                        response_body=captured_response.decode(Settings.BINARY_DECODE),
+                        headers=headers,
+                    )
                 )
-            )
+            except Exception as log_exc:
+                _mw_logger.warning("Request logging failed (non-fatal): %s", log_exc)
 
             return response
 
         except RequestValidationError as exc:
             duration = int((time.time() - start) * 1000)
 
-            await self.logger.save(
-                RequestLog(
-                    method=request.method,
-                    path=request.url.path,
-                    status_code=422,
-                    success=False,
-                    error_type="validation_error",
-                    error_message=str(exc),
-                    duration_ms=duration,
+            try:
+                await self.logger.save(
+                    RequestLog(
+                        method=request.method,
+                        path=request.url.path,
+                        status_code=422,
+                        success=False,
+                        error_type="validation_error",
+                        error_message=str(exc),
+                        duration_ms=duration,
+                    )
                 )
-            )
+            except Exception as log_exc:
+                _mw_logger.warning("Request logging failed (non-fatal): %s", log_exc)
 
             raise
 
         except Exception as exc:
             duration = int((time.time() - start) * 1000)
 
-            await self.logger.save(
-                RequestLog(
-                    method=request.method,
-                    path=request.url.path,
-                    status_code=500,
-                    success=False,
-                    error_type="internal_error",
-                    error_message=str(exc),
-                    duration_ms=duration,
+            try:
+                await self.logger.save(
+                    RequestLog(
+                        method=request.method,
+                        path=request.url.path,
+                        status_code=500,
+                        success=False,
+                        error_type="internal_error",
+                        error_message=str(exc),
+                        duration_ms=duration,
+                    )
                 )
-            )
+            except Exception as log_exc:
+                _mw_logger.warning("Request logging failed (non-fatal): %s", log_exc)
 
             raise

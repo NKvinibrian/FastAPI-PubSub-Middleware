@@ -63,6 +63,35 @@ topics: dict[str, List[Subscriber]] = {
             dependency=get_datasul_service
         ),
     ],
+    # Observer topics — todos apontam para o subscriber genérico
+    "merco-observer-order-return": [
+        Subscriber(
+            subscription="observer_sub_order_return",
+            url="/observer-subscribe/observer",
+            dependency=get_datasul_service
+        ),
+    ],
+    "merco-observer-order-rejection": [
+        Subscriber(
+            subscription="observer_sub_order_rejection",
+            url="/observer-subscribe/observer",
+            dependency=get_datasul_service
+        ),
+    ],
+    "merco-observer-invoices": [
+        Subscriber(
+            subscription="observer_sub_invoices",
+            url="/observer-subscribe/observer",
+            dependency=get_datasul_service
+        ),
+    ],
+    "merco-observer-cancellation": [
+        Subscriber(
+            subscription="observer_sub_cancellation",
+            url="/observer-subscribe/observer",
+            dependency=get_datasul_service
+        ),
+    ],
 }
 
 
@@ -112,7 +141,7 @@ class MockPubSubPublisher(PubSubProtocol):
         Raises:
             ValueError: Se não houver subscritores para o tópico
         """
-        b64message = str(base64.b64encode(message.encode()))
+        b64message = base64.b64encode(message.encode()).decode("utf-8")
 
         subscriptions = topics.get(topic, [])
         message_id = self._generate_fake_pubsub_id()

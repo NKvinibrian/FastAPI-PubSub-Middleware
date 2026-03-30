@@ -5,7 +5,6 @@ uma sessão SQLAlchemy síncrona.
 """
 from typing import Optional
 from sqlalchemy.orm import Session
-from app.infrastructure.db.models import RequestDetails
 from app.infrastructure.db.models.integrations.integrations_requests_details import RequestDetails
 from app.domain.protocol.integrations.repository import RequestDetailsRepositoryProtocol
 
@@ -31,6 +30,18 @@ class RequestDetailsRepository(RequestDetailsRepositoryProtocol):
         return self._db.query(RequestDetails).filter(
             RequestDetails.integration_id == integration_id
         ).all()
+
+    def get_by_integration_and_name(self, integration_id: int, name: str) -> Optional[RequestDetails]:
+        """
+        Busca um RequestDetails pelo integration_id e name (tipo).
+        Ex: integration_id=1, name="pedido_retorno" → retorna o template
+        de requisição para enviar o retorno de pedido dessa VAN.
+        """
+        return self._db.query(RequestDetails).filter(
+            RequestDetails.integration_id == integration_id,
+            RequestDetails.name == name,
+            RequestDetails.status == True,
+        ).first()
 
     def create(self, request_details: RequestDetails) -> RequestDetails:
         self._db.add(request_details)

@@ -14,6 +14,8 @@ Version:
 from fastapi import FastAPI
 from app.api.v1.routes.api_pub import sender
 from app.api.v1.routes.api_sub import receiver
+from app.api.v1.routes.api_sub import datasul
+from app.api.v1.routes.api_sub import observer
 from app.core.logging.middleware import RequestLoggingMiddleware
 from app.core.logging.logger import MongoLoggingService
 from app.core.mongo import db
@@ -39,3 +41,5 @@ app.add_middleware(RequestLoggingMiddleware, logger=logger)
 # Inclui os roteadores da API
 app.include_router(sender.router)
 app.include_router(receiver.router)
+app.include_router(datasul.router)
+app.include_router(observer.router)
