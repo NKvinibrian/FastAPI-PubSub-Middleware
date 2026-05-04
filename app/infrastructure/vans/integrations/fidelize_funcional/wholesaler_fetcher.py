@@ -4,6 +4,10 @@ Fetcher V2 para Fidelize Funcional Wholesaler.
 Utiliza o GraphQLFetcher (conector limpo) para buscar pedidos
 e confirmar importação. Não conhece banco, logging ou parsing.
 
+Endpoint, método HTTP e headers de cada operação vêm de
+hub.request_details (via OperationConfig pré-carregado), mesmo padrão
+do Observer subscriber. As queries GraphQL ficam no código.
+
 Implementa VanFetcherProtocol — o parâmetro `context` corresponde
 ao `industry_code` desta integração específica.
 """
@@ -12,6 +16,11 @@ import asyncio
 from typing import Any, Optional
 
 from app.domain.protocol.vans.fetcher import GraphQLFetcherProtocol
+from app.infrastructure.vans.operations_loader import OperationConfig
+
+
+OPERATION_GET_PRE_ORDERS = "get_pre_orders"
+OPERATION_SET_ORDERS_AS_IMPORTED = "set_orders_as_imported"
 
 
 class FidelizeWholesalerFetcher:
@@ -22,12 +31,24 @@ class FidelizeWholesalerFetcher:
     Delega o transporte ao GraphQLFetcherProtocol injetado — aceita
     qualquer implementação real ou mock.
 
-    Attributes:
-        _fetcher: Implementação de GraphQLFetcherProtocol.
+    Args:
+        fetcher: Implementação de GraphQLFetcherProtocol.
+        operations: Mapa nome → OperationConfig carregado de
+            hub.request_details. Quando informado, sobrescreve URL,
+            método e headers em cada chamada. Quando None, o fetcher
+            cai no comportamento legado (usa base_url do conector).
     """
 
-    def __init__(self, fetcher: GraphQLFetcherProtocol) -> None:
+    def __init__(
+        self,
+        fetcher: GraphQLFetcherProtocol,
+        operations: Optional[dict[str, OperationConfig]] = None,
+    ) -> None:
         self._fetcher = fetcher
+        self._operations = operations or {}
+
+    def _op(self, name: str) -> Optional[OperationConfig]:
+        return self._operations.get(name)
 
     async def get_pre_orders(
         self,
@@ -38,10 +59,8 @@ class FidelizeWholesalerFetcher:
         """
         Consulta pedidos disponíveis (não importados) na Fidelize.
 
-        Implementa VanFetcherProtocol — `context` é o industry_code.
-
         Args:
-            context: Código da indústria (ex: SAN, RCH). Mapeado de VanFetcherProtocol.
+            context: Código da indústria (ex: SAN, RCH).
             page: Página atual para paginação.
             per_page: Quantidade de pedidos por página.
 
@@ -108,9 +127,12 @@ class FidelizeWholesalerFetcher:
         }}
         """
 
+        op = self._op(OPERATION_GET_PRE_ORDERS)
         data = await self._fetcher.fetch(
             query=query,
             extract_path=["orders", "data"],
+            url=op.url if op else None,
+            extra_headers=op.headers if op else None,
         )
 
         if not data:
@@ -126,16 +148,17 @@ class FidelizeWholesalerFetcher:
         """
         Marca pedidos como importados na Fidelize (setOrderAsImported).
 
-        Implementa VanFetcherProtocol — `context` é o industry_code.
-
         Args:
             order_codes: Lista de order_codes a confirmar.
-            context: Código da indústria. Mapeado de VanFetcherProtocol.
+            context: Código da indústria.
 
         Raises:
             RuntimeError: Se alguma mutation falhar.
         """
         industry_code: str = context or ""
+        op = self._op(OPERATION_SET_ORDERS_AS_IMPORTED)
+        op_url = op.url if op else None
+        op_headers = op.headers if op else None
 
         async def _confirm(order_code: int | str) -> dict[str, Any]:
             mutation = f"""
@@ -154,6 +177,8 @@ class FidelizeWholesalerFetcher:
             return await self._fetcher.fetch(
                 query=mutation,
                 extract_path=["setOrderAsImported"],
+                url=op_url,
+                extra_headers=op_headers,
             )
 
         if not order_codes:
@@ -165,4 +190,3 @@ class FidelizeWholesalerFetcher:
         for result in results:
             if isinstance(result, Exception):
                 raise result
-

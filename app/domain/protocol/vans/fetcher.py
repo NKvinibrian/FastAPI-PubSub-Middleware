@@ -57,6 +57,7 @@ class GraphQLFetcherProtocol(Protocol):
         operation_name: Optional[str] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extract_path: Optional[list[str]] = None,
+        url: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Busca dados via GraphQL.
@@ -67,6 +68,7 @@ class GraphQLFetcherProtocol(Protocol):
             operation_name: Nome da operação.
             extra_headers: Headers extras.
             extract_path: Caminho para extração de dados aninhados.
+            url: Sobrescreve a URL alvo.
 
         Returns:
             Dicionário com os dados retornados.

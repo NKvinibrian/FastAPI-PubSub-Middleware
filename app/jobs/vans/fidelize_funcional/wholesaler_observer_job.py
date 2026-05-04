@@ -27,8 +27,9 @@ from app.infrastructure.vans.auth.setup_contex import SetupContext
 # Pipeline
 from app.pipelines.vans.observer_pipeline import ObserverPipeline
 
-# Parser
+# Parser + Observer Repository
 from app.domain.services.vans.fidelize_observer_parser import FidelizeObserverParser
+from app.infrastructure.repositories.vans.observer_queries import ObserverQueryRepository
 
 # PubSub
 from app.api.v1.schemas.vans.observer_message import ObserverAction
@@ -87,8 +88,10 @@ async def run() -> None:
             log_uuid=log_uuid,
         )
 
+        observer_repo = ObserverQueryRepository(db=db)
+
         parser = FidelizeObserverParser(
-            db=db,
+            observer_repo=observer_repo,
             origin_system=INTEGRATION_NAME,
             integration_id=van_context.integration_id,
         )

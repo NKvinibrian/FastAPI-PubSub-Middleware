@@ -137,12 +137,15 @@ class MockGraphQLFetcher:
         operation_name: Optional[str] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extract_path: Optional[list[str]] = None,
+        url: Optional[str] = None,
     ) -> Any:
         self.calls.append({
             "query": query,
             "variables": variables,
             "operation_name": operation_name,
             "extract_path": extract_path,
+            "url": url,
+            "extra_headers": extra_headers,
         })
         if self._responses:
             resp = self._responses.pop(0)

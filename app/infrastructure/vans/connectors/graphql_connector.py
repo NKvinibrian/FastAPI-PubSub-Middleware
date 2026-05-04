@@ -72,6 +72,7 @@ class GraphQLConnector:
         variables: Optional[dict[str, Any]] = None,
         operation_name: Optional[str] = None,
         extra_headers: Optional[dict[str, str]] = None,
+        url: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Executa uma query/mutation GraphQL autenticada.
@@ -81,6 +82,7 @@ class GraphQLConnector:
             variables: Variáveis para a query.
             operation_name: Nome da operação (se houver múltiplas no documento).
             extra_headers: Headers extras para esta requisição específica.
+            url: Sobrescreve a URL alvo. Se None, usa `self.base_url`.
 
         Returns:
             Dicionário com os dados retornados (campo "data" da resposta GraphQL).
@@ -104,9 +106,11 @@ class GraphQLConnector:
         if operation_name is not None:
             payload["operationName"] = operation_name
 
+        target_url = url or self.base_url
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                self.base_url,
+                target_url,
                 json=payload,
                 headers=headers,
                 timeout=self.timeout,

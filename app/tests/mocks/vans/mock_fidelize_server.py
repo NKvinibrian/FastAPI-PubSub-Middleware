@@ -5,14 +5,20 @@ Simula as operações do manual Wholesaler v2.2:
 - createToken (autenticação)
 - orders (consulta pedidos)
 - setOrderAsImported (confirma importação)
+- createResponse / createInvoice / createCancellation (observer mutations)
 
 Roda como app ASGI (FastAPI) — pode ser usado tanto via
 httpx.ASGITransport (testes in-process) quanto via uvicorn
 (testes manuais na porta local).
 
-Dados de pedidos são configuráveis via MOCK_ORDERS.
+Dados de pedidos são configuráveis via reset_orders():
+    reset_orders()               → restaura _DEFAULT_ORDERS (order codes fixos para testes)
+    reset_orders(count=N)        → gera N pedidos aleatórios
+    reset_orders(count=N, seed=X)→ gera N pedidos aleatórios reproduzíveis
+    reset_orders(orders=[...])   → usa lista customizada
 """
 
+import random
 import re
 from typing import Any
 
@@ -28,6 +34,93 @@ app = FastAPI(title="Mock Fidelize Wholesaler GraphQL")
 MOCK_TOKEN = "mock-jwt-token-fidelize-wholesaler-2026"
 MOCK_USERNAME = "test.distribuidor"
 MOCK_PASSWORD = "test123"
+
+_INDUSTRY_CODES = ["SAN", "RCH", "FAB", "AZT", "MSD", "PFZ", "NOV", "ELI"]
+_PAYMENT_TERMS = ["30", "30/60", "60", "30/60/90", None]
+_COMMERCIAL_CONDITIONS = ["CC001", "CC002", "CC003", None]
+
+
+def _rand_cnpj(rng: random.Random) -> str:
+    """Gera CNPJ fictício (14 dígitos sem formatação)."""
+    return "".join(str(rng.randint(0, 9)) for _ in range(14))
+
+
+def _rand_ean(rng: random.Random) -> str:
+    """Gera EAN-13 fictício."""
+    return str(rng.randint(1_000_000_000_000, 9_999_999_999_999))
+
+
+def generate_random_orders(count: int = 3, seed: int | None = None) -> list[dict[str, Any]]:
+    """
+    Gera uma lista de pedidos fictícios no formato da API Fidelize.
+
+    Args:
+        count: Quantidade de pedidos a gerar (padrão 3).
+        seed:  Semente para reprodutibilidade (None = aleatório a cada chamada).
+
+    Returns:
+        Lista de dicts compatível com o formato de _DEFAULT_ORDERS.
+    """
+    rng = random.Random(seed)
+    base_code = rng.randint(10_000, 90_000)
+    wholesaler_cnpj = _rand_cnpj(rng)
+    wholesaler_branch = _rand_cnpj(rng)
+
+    orders = []
+    for i in range(count):
+        order_code = base_code + i
+        industry_code = rng.choice(_INDUSTRY_CODES)
+        customer_code = _rand_cnpj(rng)
+
+        num_products = rng.randint(1, 4)
+        products = []
+        for _ in range(num_products):
+            gross = round(rng.uniform(5.0, 500.0), 2)
+            disc = round(rng.uniform(0, 20), 1)
+            net = round(gross * (1 - disc / 100), 2)
+            products.append({
+                "ean": _rand_ean(rng),
+                "gross_value": gross,
+                "amount": rng.randint(1, 50),
+                "discount_percentage": disc,
+                "net_value": net,
+                "monitored": rng.random() < 0.2,
+                "payment_term": rng.choice(_PAYMENT_TERMS),
+            })
+
+        orders.append({
+            "id": str(rng.randint(90_000, 999_999)),
+            "order_code": order_code,
+            "status": "ORDER_NOT_IMPORTED",
+            "tradetools_created_at": "2026-03-30T10:00:00Z",
+            "notification_obs": None,
+            "notification_status": "SENT",
+            "industry_code": industry_code,
+            "customer_code": customer_code,
+            "customer_alternative_code": None,
+            "customer_email": None,
+            "customer_code_type": "CNPJ",
+            "distribution_center_code": f"CD0{i + 1}",
+            "order_payment_term": rng.choice(_PAYMENT_TERMS) or "30",
+            "commercial_condition_code": rng.choice(_COMMERCIAL_CONDITIONS),
+            "customer_order_code": f"PED-{order_code}",
+            "destination_customer": None,
+            "profit_share_margin": None,
+            "is_free_good_discount": False,
+            "recalculates_discount": False,
+            "indicator": None,
+            "salesman_code": f"VND-{rng.randint(1, 99):03d}",
+            "scheduled_delivery_order": rng.random() < 0.15,
+            "sends_either_value_or_discount": False,
+            "sends_only_discount": False,
+            "additional_information": None,
+            "wholesaler_branch_code": wholesaler_branch,
+            "wholesaler_code": wholesaler_cnpj,
+            "products": products,
+        })
+
+    return orders
+
 
 # Pedidos disponíveis — resetáveis via reset_orders()
 _DEFAULT_ORDERS: list[dict[str, Any]] = [
@@ -167,10 +260,32 @@ _orders: list[dict[str, Any]] = []
 _imported_order_codes: set[int] = set()
 
 
-def reset_orders(orders: list[dict[str, Any]] | None = None) -> None:
-    """Reseta o estado do mock para o padrão ou com dados customizados."""
+def reset_orders(
+    orders: list[dict[str, Any]] | None = None,
+    count: int | None = None,
+    seed: int | None = None,
+) -> None:
+    """
+    Reseta o estado do mock.
+
+    Prioridade:
+        1. `orders` → usa a lista fornecida
+        2. `count`  → gera `count` pedidos aleatórios (reproduzível com `seed`)
+        3. padrão   → restaura _DEFAULT_ORDERS (order codes fixos 5001/5002/5003)
+
+    Exemplos:
+        reset_orders()               # 5001, 5002, 5003 (para testes existentes)
+        reset_orders(count=10)       # 10 pedidos aleatórios
+        reset_orders(count=5, seed=42) # 5 pedidos reproduzíveis
+        reset_orders(orders=[...])   # lista customizada
+    """
     global _orders, _imported_order_codes
-    _orders = [dict(o) for o in (orders or _DEFAULT_ORDERS)]
+    if orders is not None:
+        _orders = [dict(o) for o in orders]
+    elif count is not None:
+        _orders = generate_random_orders(count=count, seed=seed)
+    else:
+        _orders = [dict(o) for o in _DEFAULT_ORDERS]
     _imported_order_codes = set()
 
 
@@ -271,12 +386,67 @@ def _detect_operation(query: str) -> str:
         return "createToken"
     if "setorderasimported" in q:
         return "setOrderAsImported"
+    if "createresponse" in q:
+        return "createResponse"
+    if "createinvoice" in q:
+        return "createInvoice"
+    if "createcancellation" in q:
+        return "createCancellation"
     if "orders" in q and "mutation" not in q:
         return "orders"
     return "unknown"
 
 
+def _handle_create_response(query: str) -> dict:
+    """Simula createResponse — confirma retorno de pedido aceito ou rejeitado."""
+    m = re.search(r'order_code:\s*(\d+)', query)
+    order_code = int(m.group(1)) if m else 0
+    return {
+        "data": {
+            "createResponse": {
+                "id": str(order_code),
+                "content": "response created",
+                "imported_at": "2026-03-30T10:00:00Z",
+                "outcome": "SUCCESS",
+            }
+        }
+    }
+
+
+def _handle_create_invoice(query: str) -> dict:
+    """Simula createInvoice — confirma envio de nota fiscal."""
+    m = re.search(r'order_code:\s*(\d+)', query)
+    order_code = int(m.group(1)) if m else 0
+    return {
+        "data": {
+            "createInvoice": {
+                "id": str(order_code),
+                "content": "invoice created",
+                "imported_at": "2026-03-30T10:00:00Z",
+                "outcome": "SUCCESS",
+            }
+        }
+    }
+
+
+def _handle_create_cancellation(query: str) -> dict:
+    """Simula createCancellation — confirma cancelamento de pedido."""
+    m = re.search(r'order_code:\s*(\d+)', query)
+    order_code = int(m.group(1)) if m else 0
+    return {
+        "data": {
+            "createCancellation": {
+                "id": str(order_code),
+                "content": "cancellation created",
+                "imported_at": "2026-03-30T10:00:00Z",
+                "outcome": "SUCCESS",
+            }
+        }
+    }
+
+
 @app.post("/graphql")
+@app.post("/graphql/")
 async def graphql_endpoint(request: Request) -> JSONResponse:
     """Endpoint GraphQL único — roteia pela operação detectada na query."""
     body = await request.json()
@@ -300,6 +470,12 @@ async def graphql_endpoint(request: Request) -> JSONResponse:
         result = _handle_orders(query)
     elif operation == "setOrderAsImported":
         result = _handle_set_order_as_imported(query)
+    elif operation == "createResponse":
+        result = _handle_create_response(query)
+    elif operation == "createInvoice":
+        result = _handle_create_invoice(query)
+    elif operation == "createCancellation":
+        result = _handle_create_cancellation(query)
     else:
         result = _graphql_error(f"Unknown operation in query", "BAD_REQUEST")
 

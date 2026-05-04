@@ -31,6 +31,7 @@ class GraphQLFetcher:
         operation_name: Optional[str] = None,
         extra_headers: Optional[dict[str, str]] = None,
         extract_path: Optional[list[str]] = None,
+        url: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Busca dados via GraphQL.
@@ -42,6 +43,7 @@ class GraphQLFetcher:
             extra_headers: Headers extras.
             extract_path: Lista de chaves para navegar no resultado.
                 Ex: ["createOrder", "items"] navega em data["createOrder"]["items"].
+            url: Sobrescreve a URL alvo no conector (vinda de request_details).
 
         Returns:
             Dicionário com os dados retornados (campo "data" ou sub-caminho).
@@ -55,6 +57,7 @@ class GraphQLFetcher:
             variables=variables,
             operation_name=operation_name,
             extra_headers=extra_headers,
+            url=url,
         )
 
         if extract_path and data:

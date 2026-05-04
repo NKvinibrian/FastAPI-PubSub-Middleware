@@ -4,8 +4,11 @@ Observer Parser — Fidelize Funcional Wholesaler.
 Converte dados do banco (pre_pedidos, pedidos, NFs) em
 ObserverMessageSchema genéricos prontos para publicação.
 
+Nenhum acesso direto ao banco — todas as consultas passam pelo
+ObserverQueryRepository (adaptado do ObserverBase legado).
+
 Cada método:
-  1. Consulta o banco (via SQLAlchemy session)
+  1. Consulta via repositório
   2. Monta o payload no formato da VAN
   3. Envolve num ObserverMessageSchema com setup genérico
 """
@@ -14,17 +17,16 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
-
 from app.api.v1.schemas.vans.observer_message import (
     ObserverAction,
     ObserverMessageSchema,
     ObserverSetupSchema,
 )
-from app.infrastructure.db.models.vans.pre_pedidos import PrePedido, PrePedidoItem
-from app.infrastructure.db.models.vans.pedidos import Pedido, PedidoItem, PedidoComplementoVans
-from app.infrastructure.db.models.vans.notas_fiscais import NotaFiscal, NotaFiscalItem
+from app.domain.entities.vans.pedidos import PedidoEntity, PedidoItemEntity
+from app.domain.entities.vans.pre_pedidos import PrePedidoEntity, PrePedidoItemEntity
+from app.domain.protocol.vans.observer_query_repository import (
+    ObserverQueryRepositoryProtocol,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,18 +44,28 @@ class FidelizeObserverParser:
     """
     Parser do Observer para Fidelize Funcional Wholesaler.
 
-    Consulta o banco e monta ObserverMessageSchema para os 4 fluxos.
+    Recebe dados via ObserverQueryRepository e monta
+    ObserverMessageSchema para os 4 fluxos.
+
+    Args:
+        observer_repo: Repositório de queries cross-table do Observer.
+        origin_system: Nome da integração (ex: "Fidelize Funcional Wholesaler").
+        integration_id: ID da integração no banco.
+        include_rejected_items: Quando True (padrão), inclui na lista de produtos
+            todos os itens do pre_pedido, mesmo os que foram rejeitados no Datasul.
     """
 
     def __init__(
         self,
-        db: Session,
+        observer_repo: ObserverQueryRepositoryProtocol,
         origin_system: str,
         integration_id: int,
+        include_rejected_items: bool = True,
     ) -> None:
-        self._db = db
+        self._repo = observer_repo
         self._origin_system = origin_system
         self._integration_id = integration_id
+        self._include_rejected_items = include_rejected_items
 
     @staticmethod
     def _fmt_dt(dt: datetime | None) -> str:
@@ -83,72 +95,38 @@ class FidelizeObserverParser:
             payload=payload,
         )
 
-    def _get_datasul_items(self, pre_pedido: PrePedido) -> dict[str, dict]:
-        """
-        Busca itens do Datasul (pedido confirmado) vinculados ao pré-pedido.
-
-        Caminho: PrePedido.origem_sistema_id → PedidoComplementoVans.id_pedido_vans
-                 → PedidoComplementoVans.id_pedido_datasul → Pedido → PedidoItem
-
-        Returns:
-            Dict com EAN como chave (via produto_id) e dados do item Datasul.
-            Vazio se não encontrar vínculo.
-        """
-        complemento = self._db.scalars(
-            select(PedidoComplementoVans).where(
-                PedidoComplementoVans.id_pedido_vans == str(pre_pedido.origem_sistema_id),
-                PedidoComplementoVans.origem_van == self._origin_system,
-            )
-        ).first()
-
-        if not complemento:
-            return {}
-
-        pedido = self._db.scalars(
-            select(Pedido).where(
-                Pedido.id_pedido_datasul == complemento.id_pedido_datasul,
-            )
-        ).first()
-
-        if not pedido:
-            return {}
-
-        pedido_itens = self._db.scalars(
-            select(PedidoItem).where(PedidoItem.pedido_id == pedido.id)
-        ).all()
-
-        # Indexa por produto_id para cruzar com EAN do pré-pedido
-        return {
-            str(item.produto_id): {
-                "quantidade": item.quantidade,
-                "valor_unitario": item.valor_unitario,
-                "percentual_desconto": item.percentual_desconto,
-                "valor_desconto": item.valor_desconto,
-                "motivo_atendimento": item.motivo_atendimento,
-            }
-            for item in pedido_itens
-        }
-
     def _build_return_payload(
         self,
-        pre_pedido: PrePedido,
-        pre_pedido_itens: list[PrePedidoItem],
+        pre_pedido: PrePedidoEntity,
+        pre_pedido_itens: list[PrePedidoItemEntity],
         reason: str,
+        pedido: PedidoEntity | None = None,
+        pedido_itens: list[PedidoItemEntity] | None = None,
     ) -> dict[str, Any]:
-        """Monta payload de ORDER_RETURN ou ORDER_RETURN_REJECTION."""
-        datasul_items = self._get_datasul_items(pre_pedido)
+        """
+        Monta payload de ORDER_RETURN ou ORDER_RETURN_REJECTION.
+
+        Se pedido_itens disponível e reason == ORDER_SUCCESSFULLY_ACCEPTED,
+        detecta aceitação parcial verificando se algum PedidoItem.status=False.
+        """
+        pedido_itens = pedido_itens or []
+
+        # Detecta aceitação parcial somente no fluxo de aceitação
+        if reason == "ORDER_SUCCESSFULLY_ACCEPTED" and pedido_itens:
+            rejected = [i for i in pedido_itens if i.status is False]
+            if rejected:
+                reason = "ORDER_PARTIALLY_ACCEPTED"
 
         products = []
         for item in pre_pedido_itens:
-            ds = datasul_items.get(str(item.ean), {})
             products.append({
                 "ean": item.ean,
-                "response_amount": int(ds.get("quantidade", item.quantidade) or 0),
-                "unit_discount_percentage": float(ds.get("percentual_desconto", item.desconto_percentual) or 0.0),
-                "unit_discount_value": float(ds.get("valor_desconto", item.desconto_valor) or 0.0),
+                "response_amount": int(item.quantidade or 0),
+                "unit_discount_percentage": float(item.desconto_percentual or 0.0),
+                "unit_discount_value": float(item.desconto_valor or 0.0),
                 "unit_net_value": float(item.valor_liquido or 0.0),
                 "monitored": bool(item.produto_monitorado),
-                "industry_consideration": ds.get("motivo_atendimento") or item.motivo_atendimento or "000",
+                "industry_consideration": item.motivo_atendimento or "000",
             })
 
         return {
@@ -162,6 +140,8 @@ class FidelizeObserverParser:
             "invoice_at": None,
             "delivery_forecast_at": None,
             "products": products,
+            "pre_pedido_id": pre_pedido.id,
+            "pedido_datasul_id": pedido.id_pedido_datasul if pedido else None,
         }
 
     # ═══════════════════════════════════════════════════════════════════
@@ -172,32 +152,33 @@ class FidelizeObserverParser:
         """
         Monta mensagens de retorno de pedidos aceitos (createResponse).
 
-        Query: pre_pedidos com erp_confirmed=True e vans_confirmed != True.
+        Query via ObserverQueryRepository:
+            PrePedido → ComplementoVans → Pedido
+            WHERE descricao_etapa IN ('Pedido Efetivado', 'Pedido Aprovado Crédito')
+                  AND vans_confirmed IS NOT True
         """
         logger.debug("[FidelizeObserverParser] parse_order_returns")
 
-        pre_pedidos = self._db.scalars(
-            select(PrePedido).where(
-                PrePedido.erp_confirmed == True,
-                PrePedido.vans_confirmed != True,
-                PrePedido.status == True,
-            )
-        ).all()
+        pre_pedidos = self._repo.get_pre_pedidos_for_order_return(self._origin_system)
 
         messages = []
         for pp in pre_pedidos:
-            itens = self._db.scalars(
-                select(PrePedidoItem).where(PrePedidoItem.pre_pedido_id == pp.id)
-            ).all()
+            itens = self._repo.get_pre_pedido_itens(pp.id)
 
             if not itens:
                 logger.warning("[FidelizeObserverParser] PrePedido id=%d sem itens — pulando", pp.id)
                 continue
 
+            pedido, pedido_itens = self._repo.get_pedido_data(
+                pp.origem_sistema_id, self._origin_system,
+            )
+
             payload = self._build_return_payload(
                 pre_pedido=pp,
                 pre_pedido_itens=itens,
                 reason="ORDER_SUCCESSFULLY_ACCEPTED",
+                pedido=pedido,
+                pedido_itens=pedido_itens,
             )
 
             msg = self._make_message(
@@ -218,33 +199,32 @@ class FidelizeObserverParser:
         """
         Monta mensagens de rejeição (createResponse com reason rejeição).
 
-        Query: pre_pedidos com erp_returned=True, vans_confirmed != True,
-               e motivo_atendimento preenchido (indica rejeição).
+        Query via ObserverQueryRepository:
+            PrePedido → ComplementoVans → Pedido
+            WHERE descricao_etapa IN ('Pedido Cancelado')
+                  AND vans_confirmed IS NOT True
         """
         logger.debug("[FidelizeObserverParser] parse_order_rejections")
 
-        pre_pedidos = self._db.scalars(
-            select(PrePedido).where(
-                PrePedido.erp_returned == True,
-                PrePedido.vans_confirmed != True,
-                PrePedido.motivo_atendimento.isnot(None),
-                PrePedido.status == True,
-            )
-        ).all()
+        pre_pedidos = self._repo.get_pre_pedidos_for_rejection(self._origin_system)
 
         messages = []
         for pp in pre_pedidos:
-            itens = self._db.scalars(
-                select(PrePedidoItem).where(PrePedidoItem.pre_pedido_id == pp.id)
-            ).all()
+            itens = self._repo.get_pre_pedido_itens(pp.id)
 
             if not itens:
                 continue
+
+            pedido, pedido_itens = self._repo.get_pedido_data(
+                pp.origem_sistema_id, self._origin_system,
+            )
 
             payload = self._build_return_payload(
                 pre_pedido=pp,
                 pre_pedido_itens=itens,
                 reason="ORDER_REJECTED",
+                pedido=pedido,
+                pedido_itens=pedido_itens,
             )
 
             msg = self._make_message(
@@ -265,57 +245,23 @@ class FidelizeObserverParser:
         """
         Monta mensagens de NFs (createInvoice).
 
-        Query: pre_pedidos com nf_confirmed != True e status=True,
-               cruzando com nota_fiscal via pedido_id.
+        Query via ObserverQueryRepository:
+            PrePedido → ComplementoVans → Pedido
+            WHERE descricao_etapa IN ('Pedido Efetivado', 'Pedido Aprovado Crédito')
+                  AND nf_confirmed IS NOT True
         """
         logger.debug("[FidelizeObserverParser] parse_invoices")
 
-        # Pre-pedidos pendentes de confirmação de NF
-        pre_pedidos = self._db.scalars(
-            select(PrePedido).where(
-                PrePedido.erp_confirmed == True,
-                PrePedido.nf_confirmed != True,
-                PrePedido.status == True,
-            )
-        ).all()
+        pre_pedidos = self._repo.get_pre_pedidos_for_invoice(self._origin_system)
 
         messages = []
         for pp in pre_pedidos:
-            # Busca vínculo com Datasul
-            complemento = self._db.scalars(
-                select(PedidoComplementoVans).where(
-                    PedidoComplementoVans.id_pedido_vans == str(pp.origem_sistema_id),
-                    PedidoComplementoVans.origem_van == self._origin_system,
-                )
-            ).first()
-
-            if not complemento:
-                continue
-
-            # Busca pedido Datasul
-            pedido = self._db.scalars(
-                select(Pedido).where(
-                    Pedido.id_pedido_datasul == complemento.id_pedido_datasul,
-                )
-            ).first()
-
-            if not pedido:
-                continue
-
-            # Busca NFs vinculadas ao pedido Datasul
-            notas = self._db.scalars(
-                select(NotaFiscal).where(
-                    NotaFiscal.pedido_id == pedido.id,
-                    NotaFiscal.status == True,
-                )
-            ).all()
+            notas = self._repo.get_notas_fiscais_for_pre_pedido(
+                pp.origem_sistema_id, self._origin_system,
+            )
 
             for nf in notas:
-                nf_itens = self._db.scalars(
-                    select(NotaFiscalItem).where(
-                        NotaFiscalItem.notafiscal_id == nf.id
-                    )
-                ).all()
+                nf_itens = self._repo.get_nota_fiscal_itens(nf.id)
 
                 products = [
                     {
@@ -362,22 +308,19 @@ class FidelizeObserverParser:
         """
         Monta mensagens de cancelamento (createCancellation).
 
-        Query: pre_pedidos com status=False e order_cancellation_sent != True.
+        Query via ObserverQueryRepository:
+            PrePedido → ComplementoVans → Pedido
+            WHERE descricao_etapa IN ('Pedido Cancelado')
+                  AND vans_confirmed IS True (já retornado)
+                  AND order_cancellation_sent IS NOT True
         """
         logger.debug("[FidelizeObserverParser] parse_cancellations")
 
-        pre_pedidos = self._db.scalars(
-            select(PrePedido).where(
-                PrePedido.status == False,
-                PrePedido.order_cancellation_sent != True,
-            )
-        ).all()
+        pre_pedidos = self._repo.get_pre_pedidos_for_cancellation(self._origin_system)
 
         messages = []
         for pp in pre_pedidos:
-            itens = self._db.scalars(
-                select(PrePedidoItem).where(PrePedidoItem.pre_pedido_id == pp.id)
-            ).all()
+            itens = self._repo.get_pre_pedido_itens(pp.id)
 
             if not itens:
                 continue
@@ -389,6 +332,7 @@ class FidelizeObserverParser:
                 "industry_code": pp.origem_industria_codigo or "",
                 "wholesaler_branch_code": pp.distribuidor_filial_cnpj or pp.distribuidor_cnpj or "",
                 "products": products,
+                "pre_pedido_id": pp.id,
             }
 
             msg = self._make_message(

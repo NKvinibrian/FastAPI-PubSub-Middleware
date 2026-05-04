@@ -81,7 +81,7 @@ class PatchedGraphQLConnector(GraphQLConnector):
 
         return self._token or ""
 
-    async def execute(self, query, variables=None, operation_name=None, extra_headers=None):
+    async def execute(self, query, variables=None, operation_name=None, extra_headers=None, url=None):
         """Executa query GraphQL via ASGITransport."""
         token = await self._resolve_token()
 
@@ -100,7 +100,7 @@ class PatchedGraphQLConnector(GraphQLConnector):
 
         async with _make_asgi_client() as client:
             response = await client.post(
-                MOCK_BASE_URL,
+                url or MOCK_BASE_URL,
                 json=payload,
                 headers=headers,
                 timeout=self.timeout,

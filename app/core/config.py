@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     # Mocks
     MOCK_WHOLESALER: bool = False
     MOCK_PUBSUB: bool = False
+    MOCK_DATASUL: bool = False
+    MOCK_OBSERVER_VAN: bool = False
+    MOCK_GCS_BACKUP: bool = False
+
+    # GCS backup
+    GCS_BACKUP_BUCKET: str = "datahub-merco"
 
     @property
     def DATABASE_URL(self) -> str:

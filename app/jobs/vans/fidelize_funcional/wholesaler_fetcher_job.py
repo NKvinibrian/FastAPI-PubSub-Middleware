@@ -29,7 +29,14 @@ from app.domain.services.vans.order_parser import OrderParser
 
 # PubSub
 from app.infrastructure.vans.pubsub.pre_pedido_publisher import PrePedidoPubSubPublisher
-from app.core.dependencies import get_pubsub, get_wholesaler_fetcher
+from app.core.dependencies import get_pubsub, get_wholesaler_fetcher, get_van_backup
+
+# Operations loader (request_details)
+from app.infrastructure.vans.operations_loader import load_operations
+from app.infrastructure.vans.integrations.fidelize_funcional.wholesaler_fetcher import (
+    OPERATION_GET_PRE_ORDERS,
+    OPERATION_SET_ORDERS_AS_IMPORTED,
+)
 
 # Repositories
 from app.infrastructure.repositories.logging.vans import LogPrePedidosVansRepository
@@ -70,8 +77,24 @@ async def run() -> None:
         setup = SetupContext(db=db)
         van_context = setup.load(INTEGRATION_NAME)
 
+        # ── Operações (endpoints/headers de request_details) ───────────
+        operations = load_operations(
+            db=db,
+            integration_id=van_context.integration_id,
+            base_url=van_context.auth.base_url,
+            operation_names=[
+                OPERATION_GET_PRE_ORDERS,
+                OPERATION_SET_ORDERS_AS_IMPORTED,
+            ],
+        )
+
         # ── Componentes ────────────────────────────────────────────────
-        fetcher = get_wholesaler_fetcher(auth_context=van_context.auth)
+        fetcher = get_wholesaler_fetcher(
+            auth_context=van_context.auth,
+            operations=operations,
+        )
+
+        backup = get_van_backup(integration_name=INTEGRATION_NAME)
 
         log_prepedidos_repo = LogPrePedidosVansRepository(db=db)
         integration_log_repo = IntegrationLogRepository(db=db)
@@ -104,6 +127,8 @@ async def run() -> None:
             integration_logger=integration_logger,
             loop_fn=lambda: INDUSTRY_CODES,
             log_uuid=log_uuid,
+            backup=backup,
+            backup_prefix="FF",
         )
 
         await pipeline.run()

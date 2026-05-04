@@ -167,6 +167,7 @@ class MockWholesalerConnector:
         variables: Optional[dict[str, Any]] = None,
         operation_name: Optional[str] = None,
         extra_headers: Optional[dict[str, str]] = None,
+        url: Optional[str] = None,
     ) -> dict[str, Any]:
         """Roteia pela operação detectada na query."""
         q = query.strip().lower()
